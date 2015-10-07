@@ -12,27 +12,25 @@ void turn(char dir,unsigned int sensors[5])
 	
 	switch(dir)
 	{
-	case 'L':
-		// Turn left.
-		set_motors(-108,108);
-		delay(140);
-		break;
-	case 'R':
-		set_motors(108,-108);
-		delay(140);
-		break;
-	
-	case 'B':
-		// Turn around.
-		set_motors(108,-108);
-		delay_ms(280);
+        case 'L':
+            // Turn left.
+            set_motors(-108,108);
+            delay(140);
+            break;
+        case 'R':
+            set_motors(108,-108);
+            delay(140);
+            break;
+        case 'B':
+            // Turn around.
+            set_motors(108,-108);
+            delay_ms(280);
 			break;
-		
-	case 'S':
-		// Don't do anything!
-		break;
+        case 'S':
+            // go straight.
+            break;
 	}
-	}
+}
 
 // Local Variables: **
 // mode: C **

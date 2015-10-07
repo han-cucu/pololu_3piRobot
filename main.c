@@ -1,44 +1,329 @@
-/*
- * 3pi-mazesolver - demo code for the Pololu 3pi Robot
- * 
- * This code will solve a line maze constructed with a black line on a
- * white background, as long as there are no loops.  It has two
- * phases: first, it learns the maze, with a "left hand on the wall"
- * strategy, and computes the most efficient path to the finish.
- * Second, it follows its most efficient solution.
- *
- * http://www.pololu.com/docs/0J21
- * http://www.pololu.com
- * http://forum.pololu.com
- *
- */
-
-// The 3pi include file must be at the beginning of any program that
-// uses the Pololu AVR library and 3pi.
 #include <pololu/3pi.h>
-
-// This include file allows data to be stored in program space.  The
-// ATmega168 has 16k of program space compared to 1k of RAM, so large
-// pieces of static data should be stored in program space.
 #include <avr/pgmspace.h>
-
 #include "bargraph.h"
 #include "maze-solve.h"
+#include "follow-segment.h"
+#include "turn.h"
 
-// Introductory messages.  The "PROGMEM" identifier causes the data to
-// go into program space.
+
 const char welcome_line1[] PROGMEM = " Pololu";
 const char welcome_line2[] PROGMEM = "3\xf7 Robot";
 const char demo_name_line1[] PROGMEM = "Maze";
 const char demo_name_line2[] PROGMEM = "solver";
-
-// A couple of simple tunes, stored in program space.
 const char welcome[] PROGMEM = ">g32>>c32";
 const char go[] PROGMEM = "L16 cdegreg4";
 
-int d =1;
-// Initializes the 3pi, displays a welcome message, calibrates, and
-// plays the initial music.
+
+int d =1;　//dの値により、探索手法を定める
+char path[1000] = "";//経路を記憶
+unsigned char path_length = 0; //経路長
+void time_reset();
+
+int total = 0;
+int n = 0;
+int mukis[100];
+int tates[100];
+int yokos[100];
+
+int main()
+{
+    //初期化
+    initialize();
+    
+    //走行を開始
+    maze_solve();
+    
+    while(1);
+}
+
+
+void maze_solve()
+{
+    int muki =21;
+    int tate = 1;
+    int yoko =0;
+    
+    int p=0;
+    int q=0;
+    
+    int j=0;
+    int l=0;
+    
+    long int t1,t2 = 0;
+    time_reset();
+    t1 = get_ms();//スタートした時間を格納
+    
+    while(1)
+    {
+        //LCDに表示
+        clear();
+        print_long(d);
+        print_long(muki);
+        print_long(tate);
+        print_long(yoko);
+        
+        //ライントレースにより走行
+        follow_segment();
+        set_motors(50,50);
+        delay_ms(50);
+        
+        //走行可能な方向があれば、1を格納する
+        unsigned char found_left=0;
+        unsigned char found_straight=0;
+        unsigned char found_right=0;
+        unsigned int sensors[5];
+        read_line(sensors,IR_EMITTERS_ON);
+        if(sensors[0] > 100)
+        found_left = 1;
+        if(sensors[4] > 100)
+        found_right = 1;
+        set_motors(40,40);
+        delay_ms(100);
+        
+        //直進可能ならば、1を格納する
+        read_line(sensors,IR_EMITTERS_ON);
+        if(sensors[1] > 200 || sensors[2] > 200 || sensors[3] > 200)
+        found_straight = 1;
+        
+        //ゴールと判断し、走行を終了する
+        if(sensors[1] > 600 && sensors[2] > 600 && sensors[3] > 600)
+        break;
+        
+        
+        
+        //優先度より、進む方向を決める
+        unsigned char dir = select_turn(found_left, found_straight, found_right,d);
+        
+        //方向転換する
+        turn(dir);
+        
+        //方向転換して進んだロボットの向きを、値として記憶
+        switch(dir)
+        {
+            case 'L':
+            muki += 1;
+            break;
+            
+            case 'R':
+            muki -= 1;
+            break;
+            
+            case 'B':
+            muki += 2;
+            break;
+            
+            case 'S':
+            break;
+        }
+        
+        //記憶したロボットの向きの値より、現在の座標を更新する
+        switch(muki%4)
+        {
+            case(1):
+            tate += 1;
+            break;
+            case(2):
+            yoko -= 1;
+            break;
+            case(3):
+            tate -= 1;
+            break;
+            case(0):
+            yoko +=1;
+            break;
+        }
+        
+        
+        mukis[p]=muki%4;
+        tates[p]=tate;
+        yokos[p]=yoko;
+        l=0;
+        
+        //ロボットが同じ向き、座標に来ていないか(ループに入っていないか)チェック
+        for(q=0;q<p;q++)
+        {
+            if(mukis[q]==muki%4 && tates[q]==tate && yokos[q] == yoko)
+            {
+                l++;
+            }
+            
+        }
+        //ループに入っていた場合、dの値が変わり、探索方法が変更される
+        d=1+l;
+        
+        p++;
+        
+        //経路長を更新
+        path[path_length] = dir;
+        path_length ++;
+        j++;
+        
+        //経路を簡略化
+        simplify_path();
+        
+        
+    }
+    
+    
+    //探索後
+    long int t3,t4,t5,t6;
+    
+    while(1)
+    {
+        set_motors(0,0);
+        play(">>a32");
+        
+        //終了時間を格納
+        t2 = get_ms();
+        t3 = (t2 - t1)/1000;
+        t4 = t2 - t1 - t3*1000;
+        t5 = t4%100;
+        t6 = (t4 - t5)/100;
+        
+        //探索結果を表示
+        while(!button_is_pressed(BUTTON_B))
+        {
+            if(get_ms() % 2000 < 1000)
+            {
+                clear();
+                print_long(t3);
+                print(".");
+                print_long(t6);
+                lcd_goto_xy(0,1);
+                print_long(path_length);
+                print("  ");
+                print_long(j);
+            }
+            else
+            display_path();
+            delay_ms(30);
+        }
+        while(button_is_pressed(BUTTON_B));
+        
+        
+        
+        //簡略化した経路(最短経路)を再び走行
+        delay_ms(1000);
+        time_reset();
+        t1 = get_ms();
+        
+        int i;
+        for(i=0;i<path_length;i++)
+        {
+            
+            follow_segment();
+            
+            set_motors(50,50);
+            delay_ms(50);
+            set_motors(40,40);
+            delay_ms(100);
+            
+            turn(path[i]);
+        }
+        
+        follow_segment();
+        
+    }
+    
+}
+
+//LCDに経路長を表示
+void display_path()
+{
+    
+    path[path_length] = 0;
+    
+    clear();
+    print(path);
+    
+    if(path_length > 8)
+    {
+        lcd_goto_xy(0,1);
+        print(path+8);
+    }
+}
+
+
+//方向転換の値を返す
+char select_turn(unsigned char found_left, unsigned char found_straight, unsigned char found_right,int d)
+{
+    if(d%2 == 1)//int dの値が奇数なら左手法、偶数なら右手法
+    {
+        if(found_left)
+        return 'L';
+        else if(found_straight)
+        return 'S';
+        else if(found_right)
+        return 'R';
+        else
+        return 'B';
+    }
+    else{
+        if(found_right)
+        return 'R';
+        else if(found_straight)
+        return 'S';
+        else if(found_left)
+        return 'L';
+        else
+        return 'B';
+        
+    }
+}
+
+//記憶した経路を簡略化し、最短経路を再び記憶する
+void simplify_path()
+{
+    if(path_length < 3 || path[path_length-2] != 'B')
+    return;
+    
+    int total_angle = 0;//ロボットの向き
+    int i;
+    
+    //記憶した最新の3経路の向きを、角度に変換し、足す
+    for(i=1;i<=3;i++)
+    {
+        switch(path[path_length-i])
+        {
+            case 'R':
+            total_angle += 90;
+            break;
+            case 'L':
+            total_angle += 270;
+            break;
+            case 'B':
+            total_angle += 180;
+            break;
+        }
+    }
+    
+    total_angle = total_angle % 360; //角度の合計を360度以下にする
+    
+    //合計の角度を1経路の角度とし、その向きを再び記憶する
+    switch(total_angle)
+    {
+        case 0:
+        path[path_length - 3] = 'S';
+        break;
+        case 90:
+        path[path_length - 3] = 'R';
+        break;
+        case 180:
+        path[path_length - 3] = 'B';
+        break;
+        case 270:
+        path[path_length - 3] = 'L';
+        break;
+    }
+    
+    // 3経路を1経路に簡略化したので、2経路減らす
+    path_length -= 2;
+}
+
+
+
+
+//初期化
 void initialize()
 {
 	unsigned int counter; // used as a simple timer
@@ -123,38 +408,10 @@ void initialize()
 		delay_ms(100);
 	}
 	wait_for_button_release(BUTTON_B);
-
 	clear();
-
 	print("Go!");		
 
 	// Play music and wait for it to finish before we start driving.
 	play_from_program_space(go);
 	while(is_playing());
 }
-
-// This is the main function, where the code starts.  All C programs
-// must have a main() function defined somewhere.
-int main()
-{
-	// set up the 3pi
-	initialize();
-
-	// Call our maze solving routine.
-	maze_solve(d);
-
-	// This part of the code is never reached.  A robot should
-	// never reach the end of its program, or unpredictable behavior
-	// will result as random code starts getting executed.  If you
-	// really want to stop all actions at some point, set your motors
-	// to 0,0 and run the following command to loop forever:
-
-	while(1);
-}
-
-// Local Variables: **
-// mode: C **
-// c-basic-offset: 4 **
-// tab-width: 4 **
-// indent-tabs-mode: t **
-// end: **
